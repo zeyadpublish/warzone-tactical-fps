@@ -2,10 +2,17 @@ workflows:
   android-debug:
     name: Android APK (Debug — No Keystore Needed)
     max_build_duration: 60
+    instance_type: linux_x2
     environment:
-      node: 20.x
       java: 17
     scripts:
+      - name: Set up Node.js 20
+        script: |
+          curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+          sudo apt-get install -y nodejs
+          node --version
+          npm --version
+
       - name: Install Node dependencies
         script: npm ci
 
@@ -28,55 +35,10 @@ workflows:
         script: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew assembleDebug --no-daemon
 
     artifacts:
       - android/app/build/outputs/apk/debug/app-debug.apk
-
-    publishing:
-      email:
-        recipients:
-          - z6639460@gmail.com
-        notify:
-          success: true
-          failure: true
-
-  android-release:
-    name: Android APK (Signed Release)
-    max_build_duration: 60
-    environment:
-      node: 20.x
-      java: 17
-      # Uncomment below ONLY after you upload a keystore in Codemagic Settings → Code signing
-      # android_signing:
-      #   - warzone_keystore
-    scripts:
-      - name: Install Node dependencies
-        script: npm ci
-
-      - name: Build web app with Vite
-        script: npm run build
-
-      - name: Install Capacitor CLI
-        script: npm install -g @capacitor/cli
-
-      - name: Add Android platform if missing
-        script: |
-          if [ ! -d "android" ]; then
-            npx cap add android
-          fi
-
-      - name: Sync Capacitor
-        script: npx cap sync android
-
-      - name: Build release APK
-        script: |
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleRelease
-
-    artifacts:
-      - android/app/build/outputs/apk/release/app-release-unsigned.apk
 
     publishing:
       email:
@@ -91,8 +53,13 @@ workflows:
     max_build_duration: 60
     instance_type: windows_x2
     environment:
-      node: 20.x
+      java: 17
     scripts:
+      - name: Set up Node.js
+        script: |
+          nvm install 20.14.0
+          nvm use 20.14.0
+
       - name: Install dependencies
         script: npm ci
 
