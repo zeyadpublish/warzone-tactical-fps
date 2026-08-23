@@ -27,10 +27,10 @@ workflows:
         script: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tail -50
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 
 
     artifacts:
-      - android/app/build/outputs/apk/debug/app-debug.apk
+      - "android/**/*.apk"
 
     publishing:
       email:
