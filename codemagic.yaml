@@ -3,7 +3,7 @@ workflows:
     name: Android APK (Debug)
     max_build_duration: 60
     environment:
-      java: 17
+      java: 21
     scripts:
       - name: Install Node.js 20
         script: |
