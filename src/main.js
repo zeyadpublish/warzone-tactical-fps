@@ -344,57 +344,76 @@ class Game {
   _setupOnlineHandlers() {
     const scene = this.sceneManager.scene;
 
-    // ── A new player joined the room ──
+    // Helper: get or create a RemotePlayer by id
+    const getOrCreate = (id, name) => {
+      if (!id || id === this.online.socket?.id) return null;
+      if (!this.remotePlayers.has(id)) {
+        const rp = new RemotePlayer(scene, id, name ?? 'Operator');
+        this.remotePlayers.set(id, rp);
+        this._toast(`🎮 ${name ?? 'Operator'} joined the room`);
+        this.hud.addKillfeedEvent('', (name ?? 'Operator') + ' joined', '', false);
+      }
+      return this.remotePlayers.get(id);
+    };
+
+    // ── player:joined { playerId, name } — new server format ──
     this.online.on('player_joined', (p) => {
-      if (p.id === this.online.socket?.id) return; // skip self
-      if (!this.remotePlayers.has(p.id)) {
-        const rp = new RemotePlayer(scene, p.id, p.username ?? p.name ?? 'Operator');
-        this.remotePlayers.set(p.id, rp);
-        this._toast(`🎮 ${rp.name} joined the room`);
-        this.hud.addKillfeedEvent('', rp.name + ' joined', '', false);
-      }
+      // Normalize: new server uses playerId, old used id
+      const id   = p.playerId ?? p.id;
+      const name = p.name ?? p.username ?? 'Operator';
+      getOrCreate(id, name);
     });
 
-    // ── A player left ──
+    // ── player:left { playerId } — new server format ──
     this.online.on('player_left', (data) => {
-      const rp = this.remotePlayers.get(data.id);
-      if (rp) { rp.destroy(); this.remotePlayers.delete(data.id); }
+      const id = data.playerId ?? data.id;
+      const rp = this.remotePlayers.get(id);
+      if (rp) { rp.destroy(); this.remotePlayers.delete(id); }
     });
 
-    // ── Authoritative 30 Hz position sync ──
-    this.online.on('players_transform_sync', (states) => {
-      for (const s of states) {
-        if (s.id === this.online.socket?.id) continue; // skip self
-        let rp = this.remotePlayers.get(s.id);
-        if (!rp) {
-          rp = new RemotePlayer(scene, s.id, s.name ?? 'Operator');
-          this.remotePlayers.set(s.id, rp);
-        }
-        rp.applyState(s);
-      }
-    });
-
-    // ── Room state on join (existing players) ──
+    // ── room:state { players, phase } — new server format ──
     this.online.on('room_state', (data) => {
-      data.players?.forEach(p => {
-        if (p.id === this.online.socket?.id) return;
-        if (!this.remotePlayers.has(p.id)) {
-          const rp = new RemotePlayer(scene, p.id, p.username ?? p.name ?? 'Operator');
-          this.remotePlayers.set(p.id, rp);
-        }
+      const players = data.players ?? [];
+      players.forEach(p => {
+        const id   = p.playerId ?? p.id;
+        const name = p.name ?? p.username ?? 'Operator';
+        getOrCreate(id, name);
+        // Apply initial position if available
+        const rp = this.remotePlayers.get(id);
+        if (rp) rp.applyState({ x: p.x ?? 0, y: p.posY ?? 0, z: p.y ?? 0, yaw: p.rotation ?? 0 });
       });
     });
 
-    // ── We took damage from another player ──
-    this.online.on('receive_damage', ({ amount, attackerName }) => {
-      this.character.takeDamage(amount);
+    // ── 30 Hz position sync (from server if it sends this) ──
+    this.online.on('players_transform_sync', (states) => {
+      for (const s of states) {
+        const id = s.playerId ?? s.id;
+        if (!id || id === this.online.socket?.id) continue;
+        const rp = getOrCreate(id, s.name ?? 'Operator');
+        if (rp) {
+          // New server uses {x, y, rotation} in 2D — map back to 3D
+          rp.applyState({
+            x:   s.x   ?? s.position?.x ?? 0,
+            y:   s.posY ?? s.position?.y ?? 0,
+            z:   s.y   ?? s.position?.z ?? 0,  // server 2D Y → 3D Z
+            yaw: s.rotation ?? s.yaw ?? 0,
+            health: s.health,
+            anim:   s.anim ?? s.animState,
+          });
+        }
+      }
+    });
+
+    // ── We took damage ──
+    this.online.on('receive_damage', ({ amount, attackerName } = {}) => {
+      this.character.takeDamage(amount ?? 0);
       this._toast(`💥 Hit by ${attackerName ?? 'enemy'} for ${amount} dmg`);
     });
 
-    // ── Another player was killed ──
+    // ── Kill events ──
     this.online.on('player_killed', msg => {
-      const myId = AuthAPI.getSession()?.user?.id;
-      if (msg.killerId === myId || msg.killerSocketId === this.online.socket?.id) {
+      const mySocketId = this.online.socket?.id;
+      if (msg.killerSocketId === mySocketId || msg.killerId === mySocketId) {
         this.kills++;
         this.hud.addKillfeedEvent('YOU', msg.victimName ?? 'Enemy', 'M4A1', false);
         this.hud.showEliminatedBanner(msg.victimName ?? 'Enemy', false);
@@ -406,10 +425,12 @@ class Game {
 
     // ── Scoreboard ──
     this.online.on('scoreboard_sync', scores => {
-      const entries = scores.map(s => ({
-        name: s.username ?? s.name ?? s.id,
-        kills: s.kills ?? 0, deaths: s.deaths ?? 0, ping: s.ping ?? null,
-        isYou: s.id === this.online?.socket?.id,
+      const entries = (scores ?? []).map(s => ({
+        name:   s.username ?? s.name ?? s.id ?? '?',
+        kills:  s.kills  ?? 0,
+        deaths: s.deaths ?? 0,
+        ping:   s.ping   ?? null,
+        isYou:  (s.playerId ?? s.id) === this.online?.socket?.id,
       }));
       this.hud.updateLeaderboard(entries);
     });

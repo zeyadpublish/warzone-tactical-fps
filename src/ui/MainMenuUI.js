@@ -21,7 +21,7 @@ export class MainMenuUI {
 
   _build() {
     const u = this.session?.user ?? {};
-    const isGuest = u.isGuest ?? !this.session?.online;
+    const isGuest = false; // New server has no auth — everyone can play online & 1v1
 
     const root = document.createElement('div');
     root.id = 'main-menu';
