@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+.npm
+
+# Build output
+dist/
+dist-electron/
+release/
+android/
+ios/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Vite cache
+.vite/
+
+# Capacitor generated (keep config, ignore build)
+android/app/build/
+android/.gradle/
+ios/build/
+ios/DerivedData/
+
+# Large assets — keep only what's needed
+public/assets/models/**/*.fbx
+public/assets/models/**/*.obj
+!public/assets/models/environment/city.fbx
+!public/assets/models/soldier/Swat.fbx
+!public/assets/models/weapons/gun.obj
+
+# Source maps (optional — comment out to keep)
+dist/**/*.map

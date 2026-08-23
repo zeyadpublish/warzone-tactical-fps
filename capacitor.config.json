@@ -1,0 +1,14 @@
+{
+  "appId": "com.soldier.multiplayergame",
+  "appName": "Tactical Strike 3D",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": true
+  }
+}
