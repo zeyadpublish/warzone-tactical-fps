@@ -30,9 +30,10 @@ Thumbs.db
 # Vite cache
 .vite/
 
-# Capacitor generated (keep config, ignore build)
+# Capacitor generated (only ignore build outputs, not the project itself)
 android/app/build/
 android/.gradle/
+android/local.properties
 ios/build/
 ios/DerivedData/
 
