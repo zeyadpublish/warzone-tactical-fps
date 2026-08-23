@@ -30,7 +30,7 @@ export class LevelManager {
   }
 
   /* ─── Load a level ─── */
-  async loadLevel(levelNumber, onAllEnemiesKilled) {
+  async loadLevel(levelNumber, onAllEnemiesKilled, skipEnemies = false) {
     this.currentLevel    = levelNumber;
     this.onLevelComplete = onAllEnemiesKilled;
     this.levelLoaded     = false;
@@ -58,8 +58,8 @@ export class LevelManager {
     // Extra geometry for level 2
     if (levelNumber === 2) this._setupIndustrialElements();
 
-    // Spawn enemies
-    this._spawnEnemies(cfg);
+    // Spawn enemies only in offline mode
+    if (!skipEnemies) this._spawnEnemies(cfg);
 
     this.levelLoaded = true;
     console.log(`[LevelManager] Level ${levelNumber} – "${cfg.name}" loaded. ${this.enemies.length} enemies.`);

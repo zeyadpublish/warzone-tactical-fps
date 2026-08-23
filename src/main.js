@@ -12,6 +12,7 @@ import { AuthUI }              from './ui/AuthUI.js';
 import { MainMenuUI }          from './ui/MainMenuUI.js';
 import { AuthAPI }             from './api/AuthAPI.js';
 import { OnlineClient }        from './api/OnlineClient.js';
+import { RemotePlayer }        from './api/RemotePlayer.js';
 
 /* ══════════════════════════════════════ */
 class Game {
@@ -24,7 +25,9 @@ class Game {
     this._netTimer    = 0;
     this._netInterval = 0.05; // send state 20×/s
     this.session      = null;
-    this.online       = null; // OnlineClient when playing online
+    this.online       = null;         // OnlineClient when playing online
+    this._isOnline    = false;        // true when in online/1v1 mode
+    this.remotePlayers = new Map();   // socketId → RemotePlayer
   }
 
   async start() {
@@ -33,6 +36,7 @@ class Game {
 
     /* ── Main Menu ── */
     const choice = await new MainMenuUI(this.session).show();
+    this._choice = choice;
 
     /* ── Init engine ── */
     await this._initEngine();
@@ -43,7 +47,7 @@ class Game {
       const roomCode = choice.roomCode ?? 'main';
       const connected = await this.online.connect(roomCode);
       if (connected) {
-        // Leaderboard: add yourself, then update when server sends scores
+        this._isOnline = true;
         this.hud.initLeaderboard(this.session.user?.username ?? 'You');
         this.online.on('scoreboard_sync', (scores) => {
           const entries = scores.map(s => ({
@@ -59,6 +63,7 @@ class Game {
       } else {
         this._toast('⚠ Server unreachable — switching to offline mode');
         this.online = null;
+        this._isOnline = false;
       }
     } else {
       // Offline: init leaderboard with just the player
@@ -66,9 +71,10 @@ class Game {
     }
 
 
-    /* ── Load level ── */
+    /* ── Load level (city map always loads, but AI skipped when online) ── */
     this._showLoadScreen(`LOADING LEVEL ${choice.level}…`);
-    await this.levels.loadLevel(choice.level, () => this._onAllEnemiesKilled());
+    // In online/1v1 mode, load city but skip AI enemy spawn
+    await this.levels.loadLevel(choice.level, () => this._onAllEnemiesKilled(), this._isOnline);
     this.currentLevel = choice.level;
 
     // Invalidate physics mesh cache after level load
@@ -227,6 +233,9 @@ class Game {
       }
     }
 
+    // Update all remote player models (lerp position, animate)
+    for (const rp of this.remotePlayers.values()) rp.update(delta);
+
     const reloadPct = this.weapon.isReloading
       ? 1 - this.weapon.reloadTimer / this.weapon.reloadDuration : undefined;
 
@@ -293,6 +302,7 @@ class Game {
   }
 
   _checkEnemyHit(hit) {
+    // ── Check AI enemies ──
     for (const e of this.levels.getEnemies()) {
       if (e.isDead) continue;
       let obj = hit.object, found = false;
@@ -311,22 +321,97 @@ class Game {
         this.hud.showEliminatedBanner(name, isHead);
         this.audio.playKill();
       }
+      return; // only hit one thing
+    }
+
+    // ── Check remote players (1v1 / online) ──
+    for (const [id, rp] of this.remotePlayers) {
+      let obj = hit.object, found = false;
+      while (obj) { if (obj === rp.group) { found = true; break; } obj = obj.parent; }
+      if (!found) continue;
+
+      const isHead = (hit.object.name ?? '').toLowerCase().includes('head');
+      const dmg    = isHead ? this.weapon.damage * 2.5 : this.weapon.damage;
+      this.weapon.spawnDamageNumber(hit.point, dmg, isHead);
+
+      // Tell server this player was hit
+      this.online?.sendHit(id, Math.round(dmg), isHead ? 'head' : 'torso');
       break;
     }
   }
 
   /* ── Online event handlers ── */
   _setupOnlineHandlers() {
-    this.online.on('player_killed', msg => {
-      if (msg.killerId === AuthAPI.getSession()?.user?.id) {
-        this.kills++;
-        this.hud.addKillfeedEvent('YOU', msg.victimName, 'M4A1', false);
-        this.hud.showEliminatedBanner(msg.victimName, false);
-        this.audio.playKill();
+    const scene = this.sceneManager.scene;
+
+    // ── A new player joined the room ──
+    this.online.on('player_joined', (p) => {
+      if (p.id === this.online.socket?.id) return; // skip self
+      if (!this.remotePlayers.has(p.id)) {
+        const rp = new RemotePlayer(scene, p.id, p.username ?? p.name ?? 'Operator');
+        this.remotePlayers.set(p.id, rp);
+        this._toast(`🎮 ${rp.name} joined the room`);
+        this.hud.addKillfeedEvent('', rp.name + ' joined', '', false);
       }
     });
-    this.online.on('shot', msg => {
-      // Incoming shot from another player — check if it hits us
+
+    // ── A player left ──
+    this.online.on('player_left', (data) => {
+      const rp = this.remotePlayers.get(data.id);
+      if (rp) { rp.destroy(); this.remotePlayers.delete(data.id); }
+    });
+
+    // ── Authoritative 30 Hz position sync ──
+    this.online.on('players_transform_sync', (states) => {
+      for (const s of states) {
+        if (s.id === this.online.socket?.id) continue; // skip self
+        let rp = this.remotePlayers.get(s.id);
+        if (!rp) {
+          rp = new RemotePlayer(scene, s.id, s.name ?? 'Operator');
+          this.remotePlayers.set(s.id, rp);
+        }
+        rp.applyState(s);
+      }
+    });
+
+    // ── Room state on join (existing players) ──
+    this.online.on('room_state', (data) => {
+      data.players?.forEach(p => {
+        if (p.id === this.online.socket?.id) return;
+        if (!this.remotePlayers.has(p.id)) {
+          const rp = new RemotePlayer(scene, p.id, p.username ?? p.name ?? 'Operator');
+          this.remotePlayers.set(p.id, rp);
+        }
+      });
+    });
+
+    // ── We took damage from another player ──
+    this.online.on('receive_damage', ({ amount, attackerName }) => {
+      this.character.takeDamage(amount);
+      this._toast(`💥 Hit by ${attackerName ?? 'enemy'} for ${amount} dmg`);
+    });
+
+    // ── Another player was killed ──
+    this.online.on('player_killed', msg => {
+      const myId = AuthAPI.getSession()?.user?.id;
+      if (msg.killerId === myId || msg.killerSocketId === this.online.socket?.id) {
+        this.kills++;
+        this.hud.addKillfeedEvent('YOU', msg.victimName ?? 'Enemy', 'M4A1', false);
+        this.hud.showEliminatedBanner(msg.victimName ?? 'Enemy', false);
+        this.audio.playKill();
+      } else {
+        this.hud.addKillfeedEvent(msg.killerName ?? '?', msg.victimName ?? '?', 'M4A1', false);
+      }
+    });
+
+    // ── Scoreboard ──
+    this.online.on('scoreboard_sync', scores => {
+      const entries = scores.map(s => ({
+        name: s.username ?? s.name ?? s.id,
+        kills: s.kills ?? 0, deaths: s.deaths ?? 0, ping: s.ping ?? null,
+        isYou: s.id === this.online?.socket?.id,
+      }));
+      this.hud.updateLeaderboard(entries);
     });
   }
 
