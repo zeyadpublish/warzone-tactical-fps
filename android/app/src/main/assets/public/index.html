@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>WARZONE — Tactical FPS</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%2300e5ff'/><circle cx='16' cy='16' r='6' fill='%23000'/><line x1='16' y1='2' x2='16' y2='30' stroke='%2300e5ff' stroke-width='2'/><line x1='2' y1='16' x2='30' y2='16' stroke='%2300e5ff' stroke-width='2'/></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <script type="module" crossorigin src="/assets/index-DZGaq5GF.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-UAsKW_6b.css">
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════
+     THREE.JS RENDER TARGET
+════════════════════════════════════════════════ -->
+<div id="game-canvas"></div>
+
+<!-- ═══════════════════════════════════════════════
+     HUD CONTAINER  (all children injected by HUD.js)
+════════════════════════════════════════════════ -->
+<div id="hud"></div>
+
+<!-- ═══════════════════════════════════════════════
+     TOUCH CONTROLS  (hidden on desktop)
+════════════════════════════════════════════════ -->
+<div id="touch-controls">
+  <!-- Left stick: movement -->
+  <div id="joystick-zone" style="
+    position:fixed; bottom:30px; left:30px;
+    width:130px; height:130px;
+    background:rgba(255,255,255,.08); border:2px solid rgba(255,255,255,.2);
+    border-radius:50%; touch-action:none;">
+    <div id="joystick-knob" style="
+      position:absolute; top:40px; left:40px;
+      width:50px; height:50px;
+      background:rgba(0,229,255,.6); border-radius:50%;
+      box-shadow:0 0 14px rgba(0,229,255,.5);">
+    </div>
+  </div>
+
+  <!-- Right side: aim drag area -->
+  <div id="aim-zone" style="
+    position:fixed; top:0; right:0; bottom:0;
+    width:55%; touch-action:none;">
+  </div>
+
+  <!-- Action buttons -->
+  <div style="position:fixed; bottom:30px; right:30px; display:flex; flex-direction:column; gap:10px; align-items:flex-end;">
+    <button id="btn-fire"   class="touch-btn fire-btn">🔫</button>
+    <div style="display:flex; gap:10px;">
+      <button id="btn-ads"    class="touch-btn">ADS</button>
+      <button id="btn-reload" class="touch-btn">R</button>
+      <button id="btn-crouch" class="touch-btn">C</button>
+      <button id="btn-jump"   class="touch-btn">↑</button>
+    </div>
+  </div>
+</div>
+
+<style>
+.touch-btn {
+  background: rgba(0,20,35,.8);
+  border: 1.5px solid rgba(0,229,255,.5);
+  color: #e8f4f8;
+  font-size: 1rem; font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700; letter-spacing: .08em;
+  width: 56px; height: 56px;
+  border-radius: 50%; cursor: pointer;
+  touch-action: manipulation;
+  user-select: none; -webkit-user-select: none;
+}
+.fire-btn {
+  width: 72px; height: 72px;
+  border-color: rgba(255,51,85,.6);
+  font-size: 1.6rem;
+}
+</style>
+
+
+<script>
+/* Touch controls (runs before modules so layout is ready) */
+(function() {
+  let stickActive = false, stickId = null, stickBase = {x:0,y:0};
+  let aimId = null, aimLast = {x:0,y:0};
+
+  const zone  = document.getElementById('joystick-zone');
+  const knob  = document.getElementById('joystick-knob');
+  const aimZ  = document.getElementById('aim-zone');
+
+  if (!zone || !knob || !aimZ) return;
+
+  function getRect(el) { return el.getBoundingClientRect(); }
+
+  zone.addEventListener('touchstart', e => {
+    e.preventDefault();
+    const t = e.changedTouches[0];
+    stickActive = true; stickId = t.identifier;
+    const r = getRect(zone);
+    stickBase = { x: r.left + r.width/2, y: r.top + r.height/2 };
+  }, {passive:false});
+
+  zone.addEventListener('touchmove', e => {
+    e.preventDefault();
+    if (!stickActive) return;
+    for (const t of e.changedTouches) {
+      if (t.identifier !== stickId) continue;
+      const dx = t.clientX - stickBase.x, dy = t.clientY - stickBase.y;
+      const len = Math.hypot(dx, dy); const max = 45;
+      const cx = (len > max ? dx/len*max : dx);
+      const cy = (len > max ? dy/len*max : dy);
+      knob.style.transform = `translate(${cx}px,${cy}px)`;
+      if (window._inputRef) window._inputRef.setJoystickInput(cx/max, cy/max);
+    }
+  }, {passive:false});
+
+  const endStick = e => {
+    stickActive = false; stickId = null;
+    knob.style.transform = '';
+    if (window._inputRef) window._inputRef.setJoystickInput(0,0);
+  };
+  zone.addEventListener('touchend', endStick);
+  zone.addEventListener('touchcancel', endStick);
+
+  // Aim drag
+  aimZ.addEventListener('touchstart', e => {
+    e.preventDefault();
+    const t = e.changedTouches[0];
+    aimId = t.identifier; aimLast = { x: t.clientX, y: t.clientY };
+  }, {passive:false});
+
+  aimZ.addEventListener('touchmove', e => {
+    e.preventDefault();
+    for (const t of e.changedTouches) {
+      if (t.identifier !== aimId) continue;
+      const dx = t.clientX - aimLast.x, dy = t.clientY - aimLast.y;
+      aimLast = { x: t.clientX, y: t.clientY };
+      if (window._inputRef) window._inputRef.addTouchAimDelta(dx, dy);
+    }
+  }, {passive:false});
+
+  aimZ.addEventListener('touchend', e => { aimId = null; });
+
+  // Buttons
+  const fireBtn   = document.getElementById('btn-fire');
+  const adsBtn    = document.getElementById('btn-ads');
+  const reloadBtn = document.getElementById('btn-reload');
+  const crouchBtn = document.getElementById('btn-crouch');
+  const jumpBtn   = document.getElementById('btn-jump');
+
+  if (fireBtn) {
+    fireBtn.addEventListener('touchstart', e => { e.preventDefault(); if (window._inputRef) window._inputRef.isFiring = true; }, {passive:false});
+    fireBtn.addEventListener('touchend',   e => { if (window._inputRef) window._inputRef.isFiring = false; });
+  }
+  if (adsBtn) {
+    adsBtn.addEventListener('touchstart', e => { e.preventDefault(); if (window._inputRef) window._inputRef.isADS = !window._inputRef.isADS; }, {passive:false});
+  }
+  if (reloadBtn) {
+    reloadBtn.addEventListener('touchstart', e => { e.preventDefault(); if (window._inputRef) window._inputRef.isReloading = true; }, {passive:false});
+  }
+  if (crouchBtn) {
+    crouchBtn.addEventListener('touchstart', e => { e.preventDefault(); if (window._inputRef) window._inputRef.isCrouching = !window._inputRef.isCrouching; }, {passive:false});
+  }
+  if (jumpBtn) {
+    jumpBtn.addEventListener('touchstart', e => { e.preventDefault(); if (window._inputRef) window._inputRef.isJumping = true; }, {passive:false});
+    jumpBtn.addEventListener('touchend',   e => { if (window._inputRef) window._inputRef.isJumping = false; });
+  }
+})();
+</script>
+
+</body>
+</html>
