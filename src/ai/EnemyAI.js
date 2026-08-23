@@ -79,6 +79,7 @@ export class EnemyAI {
   _loadSoldier() {
     new FBXLoader().load('./assets/models/soldier/Swat.fbx', fbx => {
       fbx.scale.setScalar(0.01);
+        fbx.rotation.y = Math.PI;
       this.rightHandBone = null;
 
       fbx.traverse(c => {

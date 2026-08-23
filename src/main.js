@@ -246,11 +246,22 @@ class Game {
     // Death handling
     if (this.character.isDead && !this._deathShown) {
       this._deathShown = true;
-      this.hud.showDeathScreen(5);
-      setTimeout(() => {
-        this._findSafeSpawn().then(pos => { this.character.respawn(pos); });
-        this._deathShown = false;
-      }, 5000);
+        document.exitPointerLock?.();
+        if (this.input) this.input.isLocked = false;
+        this.hud.showDeathScreen(
+          () => { 
+            this._findSafeSpawn().then(pos => { 
+              this.character.respawn(pos); 
+              this._deathShown = false;
+              if (this.input) this.input.lock();
+            }); 
+          },
+          () => { location.reload(); }
+        );
+
+
+
+
     }
 
     this.sceneManager.render();
@@ -394,7 +405,7 @@ class Game {
   _hideLoadScreen() {
     clearInterval(this._loadBarInt);
     const b = document.getElementById('load-bar'); if (b) b.style.width = '100%';
-    setTimeout(() => {
+
       const el = document.getElementById('load-screen');
       if (el) { el.style.transition = 'opacity .5s'; el.style.opacity = '0'; setTimeout(() => el.remove(), 550); }
     }, 300);

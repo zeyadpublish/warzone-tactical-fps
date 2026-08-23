@@ -125,12 +125,15 @@ export class HUD {
         <div id="hud-lc-bar"><div id="hud-lc-fill"></div></div>
       </div>
 
-      <!-- ── Death Screen ── -->
-      <div id="hud-death-screen" class="hidden">
-        <div id="hud-death-title">YOU WERE ELIMINATED</div>
-        <div id="hud-death-respawn">Respawning in <span id="hud-death-counter">5</span>s</div>
-      </div>
-    `;
+        <!-- 💀 Death Screen 💀 -->
+        <div id="hud-death-screen" class="hidden">
+          <div id="hud-death-title">YOU WERE ELIMINATED</div>
+          <div id="hud-death-buttons">
+            <button id="btn-respawn">RESPAWN</button>
+            <button id="btn-main-menu">MAIN MENU</button>
+          </div>
+        </div>
+      `;
   }
 
   _bindElements() {
@@ -267,17 +270,17 @@ export class HUD {
   }
 
   /* ── Death screen ── */
-  showDeathScreen(respawnSeconds = 5) {
+    showDeathScreen(onRespawn, onMainMenu) {
     const el = this._el.deathScreen;
     if (!el) return;
     el.classList.remove('hidden');
-    let rem = respawnSeconds;
-    if (this._el.deathCounter) this._el.deathCounter.textContent = rem;
-    const t = setInterval(() => {
-      rem--;
-      if (this._el.deathCounter) this._el.deathCounter.textContent = Math.max(0, rem);
-      if (rem <= 0) { clearInterval(t); el.classList.add('hidden'); }
-    }, 1000);
+      const btnRespawn = document.getElementById('btn-respawn');
+      const btnMenu = document.getElementById('btn-main-menu');
+      if (btnRespawn) btnRespawn.onclick = () => { el.classList.add('hidden'); if(onRespawn) onRespawn(); };
+      if (btnMenu) btnMenu.onclick = () => { el.classList.add('hidden'); if(onMainMenu) onMainMenu(); };
+
+
+
   }
 
   /* ── Minimap update ── */
@@ -391,3 +394,4 @@ export class HUD {
     }).join('');
   }
 }
+
