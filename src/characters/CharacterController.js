@@ -19,9 +19,9 @@ export class CharacterController {
     this.pitch = 0;
 
     // Movement params
-    this.walkSpeed   = 5.5;
-    this.sprintSpeed = 9.5;
-    this.crouchSpeed = 2.6;
+    this.walkSpeed   = 8.0;
+    this.sprintSpeed = 14.0;
+    this.crouchSpeed = 3.5;
     this.jumpForce   = 7.0;
     this.gravity     = -20;
 

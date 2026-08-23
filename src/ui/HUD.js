@@ -52,13 +52,12 @@ export class HUD {
 
       <!-- ── Bottom Center: Vitals ── -->
       <div id="hud-vitals">
-        <!-- 3-Plate Armor -->
-        <div id="hud-armor-row">
-          <div class="armor-plate" id="plate1"></div>
-          <div class="armor-plate" id="plate2"></div>
-          <div class="armor-plate" id="plate3"></div>
-          <span id="hud-armor-val">150</span>
-        </div>
+        <!-- Armor Bar -->
+          <div id="hud-armor-row">
+            <span style="font-size:.75rem;color:#00e5ff;letter-spacing:.1em;min-width:50px;">ARMOR</span>
+            <div id="hud-armor-bar"><div id="hud-armor-fill" style="width:100%"></div></div>
+            <span id="hud-armor-val">150</span>
+          </div>
         <!-- HP Bar -->
         <div id="hud-hp-row">
           <div id="hud-hp-bar"><div id="hud-hp-fill"></div></div>
@@ -143,7 +142,7 @@ export class HUD {
       ammoRes    : g('hud-ammo-res'),
       reloadBar  : g('hud-reload-bar'),
       reloadFill : g('hud-reload-fill'),
-      plate1     : g('plate1'), plate2: g('plate2'), plate3: g('plate3'),
+      armorFill : g('hud-armor-fill'),
       armorVal   : g('hud-armor-val'),
       hpFill     : g('hud-hp-fill'), hpVal: g('hud-hp-val'),
       levelNum   : g('hud-level-num'), levelName: g('hud-level-name'),
@@ -188,12 +187,11 @@ export class HUD {
       this._el.vignette?.classList.remove('low-health');
     }
 
-    // Armor plates (50 each)
-    const a = Math.max(0, armor);
-    if (this._el.plate1) this._el.plate1.className = 'armor-plate' + (a >= 50  ? ' plate-full' : (a > 0 ? ' plate-partial' : ''));
-    if (this._el.plate2) this._el.plate2.className = 'armor-plate' + (a >= 100 ? ' plate-full' : (a > 50 ? ' plate-partial' : ''));
-    if (this._el.plate3) this._el.plate3.className = 'armor-plate' + (a >= 150 ? ' plate-full' : (a > 100 ? ' plate-partial' : ''));
-    if (this._el.armorVal) this._el.armorVal.textContent = Math.ceil(a);
+    // Armor bar
+      const a = Math.max(0, armor);
+      const maxArmor = 150;
+      if (this._el.armorFill) this._el.armorFill.style.width = ((a / maxArmor) * 100).toFixed(1) + '%';
+      if (this._el.armorVal) this._el.armorVal.textContent = Math.ceil(a);
 
     // Level
     if (this._el.levelNum  && level !== undefined) this._el.levelNum.textContent  = `LEVEL ${level}`;
@@ -394,4 +392,6 @@ export class HUD {
     }).join('');
   }
 }
+
+
 

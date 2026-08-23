@@ -100,7 +100,7 @@ export class LevelManager {
     const makeSpawnPos = (idx, total) => {
       const angle  = (idx / total) * Math.PI * 2 + (Math.random() - 0.5) * 0.7;
       const radius = 20 + Math.random() * 45;
-      return { x: Math.cos(angle) * radius, y: 0, z: Math.sin(angle) * radius };
+      return { x: Math.cos(angle) * radius, y: 5, z: Math.sin(angle) * radius };
     };
 
     const entries = [
