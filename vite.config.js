@@ -7,7 +7,10 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
-    open: false
+    open: false,
+    watch: {
+      ignored: ['**/release/**', '**/android/**', '**/.git/**']
+    }
   },
   build: {
     outDir: 'dist',

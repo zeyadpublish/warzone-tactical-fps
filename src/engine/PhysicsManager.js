@@ -39,13 +39,17 @@ export class PhysicsManager {
 
   /* ── Ground height via downward raycast ── */
   getGroundHeight(position) {
-    this._orig.set(position.x, position.y + 2, position.z);
+    // Cast from high above to catch any geometry below
+    this._orig.set(position.x, position.y + 60, position.z);
     this._rc.set(this._orig, this._down);
     this._rc.near = 0;
-    this._rc.far  = 100;
+    this._rc.far  = 200;
 
     const hits = this._rc.intersectObjects(this._getMeshes(), false);
-    if (hits.length > 0) return hits[0].point.y;
+    // Return the highest ground hit that's BELOW current position
+    for (const hit of hits) {
+      if (hit.point.y < position.y + 1) return hit.point.y;
+    }
     return 0;
   }
 

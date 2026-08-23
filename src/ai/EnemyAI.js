@@ -23,8 +23,9 @@ export class EnemyAI {
 
     /* ── Scene graph ── */
     this.group = new THREE.Group();
-    this.group.position.set(this.config.position.x, 0, this.config.position.z);
+    this.group.position.set(this.config.position.x, 50, this.config.position.z);
     this.scene.add(this.group);
+    this._velY = -1; // start falling
 
     this.model       = null;
     this.mixer       = null;
@@ -254,20 +255,24 @@ export class EnemyAI {
 
   /* ──────────────── Ground snapping ──────────────── */
   _snapToGround(delta) {
-    this._groundSampleTimer -= delta;
-    if (this._groundSampleTimer <= 0) {
-      this._groundSampleTimer = 0.3;
-      const origin = this.group.position.clone(); origin.y += 2;
-      this._rc.set(origin, this._down); this._rc.near = 0; this._rc.far = 30;
-      const meshes = this.physicsManager._getMeshes?.() ?? [];
-      const hits = this._rc.intersectObjects(meshes, false);
-      if (hits.length) this.groundY = hits[0].point.y;
-    }
-    if (this.group.position.y > this.groundY + 0.05) {
-      this.group.position.y = Math.max(this.groundY, this.group.position.y - 8 * delta);
+    // Use physicsManager which has the full scene mesh cache
+    const groundY = this.physicsManager.getGroundHeight(this.group.position);
+
+    // Apply gravity — fall toward ground
+    if (this.group.position.y > groundY + 0.02) {
+      this._velY = (this._velY ?? 0) - 18 * delta; // gravity
+      this.group.position.y += this._velY * delta;
+      // Don't overshoot below ground
+      if (this.group.position.y < groundY) {
+        this.group.position.y = groundY;
+        this._velY = 0;
+      }
     } else {
-      this.group.position.y = this.groundY;
+      // Snap to ground and stop falling
+      this.group.position.y = groundY;
+      this._velY = 0;
     }
+    this.groundY = groundY;
   }
 
   /* ──────────────── Shooting ──────────────── */
