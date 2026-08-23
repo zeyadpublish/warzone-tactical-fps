@@ -406,7 +406,7 @@ class Game {
     clearInterval(this._loadBarInt);
     const b = document.getElementById('load-bar'); if (b) b.style.width = '100%';
 
-      const el = document.getElementById('load-screen');
+      setTimeout(() => { const el = document.getElementById('load-screen');
       if (el) { el.style.transition = 'opacity .5s'; el.style.opacity = '0'; setTimeout(() => el.remove(), 550); }
     }, 300);
   }
