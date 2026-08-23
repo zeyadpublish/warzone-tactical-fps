@@ -261,23 +261,98 @@ export class MainMenuUI {
       showPanel('mm-room-panel');
     });
 
+    let _lobbySocket = null; // pre-game socket used in waiting room
+
+    const _cleanupLobby = () => {
+      if (_lobbySocket) { try { _lobbySocket.disconnect(); } catch(e){} _lobbySocket = null; }
+    };
+
     document.getElementById('mm-room-back')?.addEventListener('click', () => {
+      _cleanupLobby();
       document.getElementById('mm-room-panel')?.classList.add('hidden');
     });
 
     document.getElementById('mm-create-room')?.addEventListener('click', () => {
-      const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+      const code   = Math.random().toString(36).substring(2, 8).toUpperCase();
       const status = document.getElementById('mm-room-status');
-      if (status) {
-        status.innerHTML = `
-          <div style="font-size:11px;letter-spacing:2px;color:#888;margin-bottom:6px">YOUR ROOM CODE — SHARE WITH FRIEND</div>
-          <div style="font-size:36px;letter-spacing:10px;color:#00e5ff;font-weight:bold;margin-bottom:8px">${code}</div>
-          <div style="color:#555;font-size:11px;margin-bottom:14px">Waiting for friend to join...</div>
-          <button class="mm-deploy-btn" id="mm-start-1v1" style="font-size:13px">▶ START GAME NOW</button>`;
-        document.getElementById('mm-start-1v1')?.addEventListener('click', () => {
-          this._done({ mode: 'online', level: 1, roomCode: code });
+      if (!status) return;
+
+      // Show waiting UI — Start button DISABLED until friend joins
+      status.innerHTML = `
+        <div style="font-size:11px;letter-spacing:2px;color:#888;margin-bottom:6px">YOUR ROOM CODE — SHARE WITH FRIEND</div>
+        <div style="font-size:40px;letter-spacing:12px;color:#00e5ff;font-weight:bold;margin-bottom:10px;text-shadow:0 0 20px #00e5ff88">${code}</div>
+        <div id="mm-wait-status" style="color:#555;font-size:13px;letter-spacing:2px;margin-bottom:16px">
+          ⏳ Waiting for friend to join...
+        </div>
+        <button class="mm-deploy-btn" id="mm-start-1v1"
+          style="font-size:14px;opacity:0.35;pointer-events:none;cursor:not-allowed;filter:grayscale(1)">
+          ▶ WAITING FOR FRIEND...
+        </button>
+        <button id="mm-cancel-lobby" style="display:block;margin:10px auto 0;background:transparent;border:none;color:#555;font-size:12px;cursor:pointer;letter-spacing:2px;font-family:'Barlow Condensed',sans-serif">
+          ✕ CANCEL
+        </button>`;
+
+      document.getElementById('mm-cancel-lobby')?.addEventListener('click', () => {
+        _cleanupLobby();
+        status.innerHTML = '<div style="color:#ff4455">Room cancelled.</div>';
+      });
+
+      // Connect a lightweight lobby socket to listen for the friend joining
+      _cleanupLobby();
+      import('https://cdn.socket.io/4.7.2/socket.io.esm.min.js').then(({ io }) => {
+        const session = this._session;
+        const myName  = session?.user?.username || 'Host';
+        _lobbySocket  = io('https://frontline-game-host--zeyad0565615778.replit.app', {
+          transports: ['websocket', 'polling'],
+          auth:  { token: session?.token },
+          query: { token: session?.token, name: myName },
         });
-      }
+
+        _lobbySocket.on('connect', () => {
+          _lobbySocket.emit('join_room', { roomName: code, playerName: myName });
+        });
+
+        _lobbySocket.on('player_joined', (p) => {
+          const friendName = p.username ?? p.name ?? 'Friend';
+          const waitEl = document.getElementById('mm-wait-status');
+          if (waitEl) {
+            waitEl.innerHTML = `<span style="color:#00ff88;font-size:15px;letter-spacing:2px">✅ ${friendName} joined!</span>`;
+          }
+          // Enable the Start button
+          const startBtn = document.getElementById('mm-start-1v1');
+          if (startBtn) {
+            startBtn.textContent  = `▶ START GAME WITH ${friendName.toUpperCase()}`;
+            startBtn.style.opacity       = '1';
+            startBtn.style.pointerEvents = 'auto';
+            startBtn.style.cursor        = 'pointer';
+            startBtn.style.filter        = 'none';
+            startBtn.style.animation     = 'elim-in .3s ease forwards, vignette-pulse 1.2s ease-in-out infinite';
+            startBtn.addEventListener('click', () => {
+              _cleanupLobby();
+              this._done({ mode: 'online', level: 1, roomCode: code });
+            }, { once: true });
+          }
+        });
+
+        _lobbySocket.on('connect_error', () => {
+          const waitEl = document.getElementById('mm-wait-status');
+          if (waitEl) waitEl.innerHTML = '<span style="color:#ff4455">⚠ Cannot reach server — check connection</span>';
+        });
+      }).catch(() => {
+        // Fallback: no pre-game socket, just show the code and let them start manually
+        const startBtn = document.getElementById('mm-start-1v1');
+        if (startBtn) {
+          startBtn.textContent         = '▶ START GAME NOW';
+          startBtn.style.opacity       = '1';
+          startBtn.style.pointerEvents = 'auto';
+          startBtn.style.filter        = 'none';
+          startBtn.style.cursor        = 'pointer';
+          startBtn.addEventListener('click', () => {
+            _cleanupLobby();
+            this._done({ mode: 'online', level: 1, roomCode: code });
+          }, { once: true });
+        }
+      });
     });
 
     document.getElementById('mm-join-room')?.addEventListener('click', () => {
@@ -285,9 +360,10 @@ export class MainMenuUI {
       const code = raw.replace(/[^A-Z0-9]/g, '');
       if (code.length < 4) { this._flash('Enter a valid room code'); return; }
       document.getElementById('mm-room-status').innerHTML =
-        `<div style="color:#44ff88">✓ Joining room <b>${code}</b>…</div>`;
+        `<div style="color:#44ff88;font-size:15px">✓ Joining room <b>${code}</b>…</div>`;
       setTimeout(() => this._done({ mode: 'online', level: 1, roomCode: code }), 600);
     });
+
 
 
     // Logout
