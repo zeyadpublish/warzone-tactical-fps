@@ -21,11 +21,13 @@ export class EnemyAI {
     this.health     = this._maxHealth();
     this.deathTimer = 0;
 
-    /* ── Scene graph ── */
+    /* ── Scene graph — HIDDEN until model + anims ready ── */
     this.group = new THREE.Group();
-    this.group.position.set(this.config.position.x, 50, this.config.position.z);
+    // Start at config position at y=0; will snap to real ground in _onAnimsReady
+    this.group.position.set(this.config.position.x, 0, this.config.position.z);
+    this.group.visible = false; // invisible until fully loaded
     this.scene.add(this.group);
-    this._velY = -1; // start falling
+    this._velY = 0;
 
     this.model       = null;
     this.mixer       = null;
@@ -61,7 +63,6 @@ export class EnemyAI {
 
     /* ── Ground Y (for snapping) ── */
     this.groundY = 0;
-    this._groundSampleTimer = 0;
 
     this._rc   = new THREE.Raycaster();
     this._down = new THREE.Vector3(0, -1, 0);
@@ -114,6 +115,11 @@ export class EnemyAI {
     headMesh.position.y = 1.7; g.add(headMesh);
     this.group.add(g);
     this.model = g;
+    // Snap to ground and show immediately
+    const groundY = this.physicsManager.getGroundHeight(this.group.position);
+    this.groundY = groundY;
+    this.group.position.y = groundY;
+    this.group.visible = true;
     this.modelReady = true;
     this._buildHealthBar();
   }
@@ -175,7 +181,17 @@ export class EnemyAI {
   }
 
   _onAnimsReady() {
+    // Snap immediately to ground before becoming visible
+    const groundY = this.physicsManager.getGroundHeight(this.group.position);
+    this.groundY = groundY;
+    this.group.position.y = groundY;
+
+    // Update waypoint Y values to match ground level
+    this.waypoints.forEach(wp => { wp.y = groundY; });
+
+    // Now show the enemy standing on the ground with idle animation
     this.modelReady = true;
+    this.group.visible = true;
     this._play('idle');
   }
 
@@ -255,25 +271,12 @@ export class EnemyAI {
 
   /* ──────────────── Ground snapping ──────────────── */
   _snapToGround(delta) {
-    // Use physicsManager which has the full scene mesh cache
+    // Instantly keep enemy on the ground — no falling, no velocity
     const groundY = this.physicsManager.getGroundHeight(this.group.position);
-
-    // Apply gravity — fall toward ground
-    if (this.group.position.y > groundY + 0.02) {
-      this._velY = (this._velY ?? 0) - 18 * delta; // gravity
-      this.group.position.y += this._velY * delta;
-      // Don't overshoot below ground
-      if (this.group.position.y < groundY) {
-        this.group.position.y = groundY;
-        this._velY = 0;
-      }
-    } else {
-      // Snap to ground and stop falling
-      this.group.position.y = groundY;
-      this._velY = 0;
-    }
     this.groundY = groundY;
+    this.group.position.y = groundY;
   }
+
 
   /* ──────────────── Shooting ──────────────── */
   _shoot(playerController) {
