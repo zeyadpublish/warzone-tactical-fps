@@ -4,11 +4,17 @@
   "webDir": "dist",
   "server": {
     "androidScheme": "https",
-    "cleartext": true
+    "cleartext": true,
+    "allowNavigation": [
+      "frontline-game-host--zeyad0565615778.replit.app",
+      "*.replit.app"
+    ]
   },
   "android": {
     "allowMixedContent": true,
     "captureInput": true,
-    "webContentsDebuggingEnabled": true
+    "webContentsDebuggingEnabled": true,
+    "loggingBehavior": "none",
+    "useLegacyBridge": false
   }
 }

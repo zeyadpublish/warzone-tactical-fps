@@ -15,19 +15,24 @@ workflows:
         script: |
           export PATH="/opt/homebrew/opt/node@20/bin:/usr/local/opt/node@20/bin:$PATH"
           npm ci
+          # Build with ./ base (NOT GitHub Pages base) for Android WebView
           npm run build
 
-      - name: Sync Capacitor
+      - name: Sync Capacitor (copy dist → android assets)
         script: |
           export PATH="/opt/homebrew/opt/node@20/bin:/usr/local/opt/node@20/bin:$PATH"
           npm install -g @capacitor/cli
-          npx cap sync android
+          # Force sync - copies dist/ into android/app/src/main/assets/public/
+          npx cap sync android --no-build
+          echo "✅ Capacitor sync done"
+          # Verify the files were copied
+          ls android/app/src/main/assets/public/ | head -10
 
       - name: Build debug APK
         script: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1
 
     artifacts:
       - "android/**/*.apk"
