@@ -1,11 +1,11 @@
 /* ═══════════════════════════════════════════════════════════════
    AuthAPI.js
-   API Base: https://frontline-game-host--zeyad0565615778.replit.app/api
-   WebSocket: wss://frontline-game-host--zeyad0565615778.replit.app/api/ws
+   API Base: https://warzone-tactical-fps-server--my-api.replit.app/api
+   WebSocket: wss://warzone-tactical-fps-server--my-api.replit.app
    ═══════════════════════════════════════════════════════════════ */
 
-export const REPLIT_API_BASE = 'https://frontline-game-host--zeyad0565615778.replit.app/api';
-export const REPLIT_WS_URL   = 'wss://frontline-game-host--zeyad0565615778.replit.app/api/ws';
+export const REPLIT_API_BASE = 'https://warzone-tactical-fps-server--my-api.replit.app/api';
+export const REPLIT_WS_URL   = 'wss://warzone-tactical-fps-server--my-api.replit.app';
 
 const BASE = () => localStorage.getItem('authApiBase') || REPLIT_API_BASE;
 

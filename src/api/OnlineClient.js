@@ -1,11 +1,11 @@
 /* ═══════════════════════════════════════════════════════════════
    OnlineClient.js  —  Socket.io multiplayer client
-   Server: https://frontline-game-host--zeyad0565615778.replit.app
+   Server: https://warzone-tactical-fps-server--my-api.replit.app
    ═══════════════════════════════════════════════════════════════ */
 import { io } from 'socket.io-client';
 import { AuthAPI } from './AuthAPI.js';
 
-const SERVER_URL = 'https://frontline-game-host--zeyad0565615778.replit.app';
+const SERVER_URL = 'https://warzone-tactical-fps-server--my-api.replit.app';
 
 export class OnlineClient {
   constructor(hud) {
@@ -15,7 +15,8 @@ export class OnlineClient {
     this.roomName  = 'main';
     this.players   = new Map(); // socketId → { name, x, y, z, yaw, pitch, health, anim }
     this._handlers = {};
-    this._stateInterval = null;
+    this._pingInterval = null;
+    this._latency  = 0;
   }
 
   /* ── Connect ── */
@@ -31,7 +32,7 @@ export class OnlineClient {
         auth:  { token },
         query: { token, name },
         reconnection:        true,
-        reconnectionAttempts: 5,
+        reconnectionAttempts: 8,
         reconnectionDelay:   1500,
       });
 
@@ -39,8 +40,11 @@ export class OnlineClient {
         this.connected = true;
         console.log('[OnlineClient] Connected. ID:', this.socket.id);
 
-        // Join default room right after connecting
+        // Join room right after connecting
         this.socket.emit('join_room', { roomName: this.roomName, playerName: name });
+
+        // Start ping measurement
+        this._startPing();
         resolve(true);
       });
 
@@ -51,64 +55,120 @@ export class OnlineClient {
 
       this.socket.on('disconnect', (reason) => {
         this.connected = false;
+        this._stopPing();
         console.warn('[OnlineClient] Disconnected:', reason);
       });
 
-      /* ── Server events ── */
+      /* ──────────── Server → Client events ──────────── */
 
-      this.socket.on('room_state', (data) => {
+      // Room state (who's already in the room when we join)
+      // Support both old format (room_state) and new format (room:state)
+      const onRoomState = (data) => {
         console.log('[OnlineClient] Room state:', data.players?.length, 'players');
         data.players?.forEach(p => {
           if (p.id !== this.socket.id) this.players.set(p.id, p);
         });
-        this._handlers.room_joined?.(data);
-      });
+        this._handlers.room_state?.(data);
+      };
+      this.socket.on('room_state', onRoomState);
+      this.socket.on('room:state', onRoomState);
 
-      this.socket.on('player_joined', (p) => {
+      // Player joined
+      const onPlayerJoined = (p) => {
         this.players.set(p.id, p);
-        this.hud?.addKillfeedEvent?.('', p.username + ' joined', '', false);
+        this.hud?.addKillfeedEvent?.('', (p.username ?? p.name ?? '?') + ' joined', '', false);
         this._handlers.player_joined?.(p);
-      });
+      };
+      this.socket.on('player_joined', onPlayerJoined);
+      this.socket.on('player:joined', onPlayerJoined);
 
-      this.socket.on('player_left', (id) => {
+      // Player left
+      const onPlayerLeft = (data) => {
+        const id = data?.id ?? data;
         this.players.delete(id);
         this._handlers.player_left?.({ id });
-      });
+      };
+      this.socket.on('player_left', onPlayerLeft);
+      this.socket.on('player:left',  onPlayerLeft);
 
-      // Authoritative 30 Hz transform broadcast from server
-      this.socket.on('players_transform_sync', (states) => {
+      // 30 Hz position sync
+      const onTransformSync = (states) => {
         states.forEach(s => {
-          if (s.id === this.socket.id) return; // skip ourselves
+          if (s.id === this.socket.id) return; // skip self
           this.players.set(s.id, { ...this.players.get(s.id), ...s });
         });
         this._handlers.players_transform_sync?.(states);
-      });
+      };
+      this.socket.on('players_transform_sync', onTransformSync);
+      this.socket.on('players:transform',      onTransformSync);
+      this.socket.on('state:sync',             onTransformSync);
 
-      this.socket.on('remote_shoot', (data) => this._handlers.shot?.(data));
+      // Remote shot (visual only)
+      const onRemoteShoot = (data) => this._handlers.shot?.(data);
+      this.socket.on('remote_shoot', onRemoteShoot);
+      this.socket.on('remote:shoot', onRemoteShoot);
 
-      this.socket.on('receive_damage', ({ amount, attackerName }) => {
-        this._handlers.receive_damage?.({ amount, attackerName });
-      });
+      // We took damage
+      const onReceiveDamage = ({ amount, attackerName, remainingHP } = {}) => {
+        this._handlers.receive_damage?.({ amount, attackerName, remainingHP });
+      };
+      this.socket.on('receive_damage', onReceiveDamage);
+      this.socket.on('receive:damage', onReceiveDamage);
+      this.socket.on('player:damage',  onReceiveDamage);
 
-      this.socket.on('player_killed', (data) => {
+      // Player killed
+      const onPlayerKilled = (data) => {
         this._handlers.player_killed?.(data);
-        this.hud?.addKillfeedEvent?.(data.killerName, data.victimName, 'rifle');
+        const killer = data.killerName ?? data.killerSocketId ?? '?';
+        const victim = data.victimName ?? '?';
+        this.hud?.addKillfeedEvent?.(killer, victim, 'rifle', false);
+      };
+      this.socket.on('player_killed', onPlayerKilled);
+      this.socket.on('player:killed', onPlayerKilled);
+      this.socket.on('kill:event',    onPlayerKilled);
+
+      // Scoreboard
+      const onScoreboard = (scores) => this._handlers.scoreboard_sync?.(scores);
+      this.socket.on('scoreboard_sync', onScoreboard);
+      this.socket.on('scoreboard:sync', onScoreboard);
+      this.socket.on('leaderboard:update', onScoreboard);
+
+      // Respawn (server tells us to respawn)
+      this.socket.on('respawn', (data) => {
+        this._handlers.respawn?.(data);
       });
 
-      this.socket.on('scoreboard_sync', (scores) => {
-        this._handlers.scoreboard_sync?.(scores);
+      // Ping response
+      this.socket.on('server_pong', (ts) => {
+        this._latency = Math.round((Date.now() - ts) / 2);
+      });
+      this.socket.on('pong', (ts) => {
+        this._latency = Math.round((Date.now() - ts) / 2);
       });
     });
   }
 
+  /* ── Ping measurement ── */
+  _startPing() {
+    this._stopPing();
+    this._pingInterval = setInterval(() => {
+      if (this.connected) this.socket.emit('client_ping', Date.now());
+    }, 2000);
+  }
+  _stopPing() {
+    if (this._pingInterval) { clearInterval(this._pingInterval); this._pingInterval = null; }
+  }
+
+  get ping() { return this._latency; }
+
   /* ── Disconnect ── */
   disconnect() {
-    clearInterval(this._stateInterval);
+    this._stopPing();
     this.socket?.disconnect();
     this.connected = false;
   }
 
-  /* ── Send player position (called at 20 Hz from game loop) ── */
+  /* ── Send player position (20 Hz from game loop) ── */
   sendPlayerState(position, yaw, pitch, health, armor, animState) {
     if (!this.connected || !this.socket) return;
     this.socket.emit('sync_state', {
@@ -117,12 +177,13 @@ export class OnlineClient {
         y: +position.y.toFixed(2),
         z: +position.z.toFixed(2),
       },
-      yaw:   +yaw.toFixed(3),
-      pitch: +pitch.toFixed(3),
+      yaw:        +yaw.toFixed(3),
+      pitch:      +pitch.toFixed(3),
       health,
+      armor,
       animState,
-      isADS:       false,
       isCrouching: false,
+      isADS:       false,
     });
   }
 
@@ -130,7 +191,7 @@ export class OnlineClient {
   sendShot(origin, direction, hitPlayerId = null, damage = 0) {
     if (!this.connected || !this.socket) return;
     this.socket.emit('shoot_event', {
-      origin:      { x: origin.x, y: origin.y, z: origin.z },
+      origin:      { x: origin.x,    y: origin.y,    z: origin.z },
       direction:   { x: direction.x, y: direction.y, z: direction.z },
       hitPlayerId, damage,
     });

@@ -302,7 +302,7 @@ export class MainMenuUI {
       import('https://cdn.socket.io/4.7.2/socket.io.esm.min.js').then(({ io }) => {
         const session = this._session;
         const myName  = session?.user?.username || 'Host';
-        _lobbySocket  = io('https://frontline-game-host--zeyad0565615778.replit.app', {
+        _lobbySocket  = io('https://warzone-tactical-fps-server--my-api.replit.app', {
           transports: ['websocket', 'polling'],
           auth:  { token: session?.token },
           query: { token: session?.token, name: myName },
@@ -312,7 +312,7 @@ export class MainMenuUI {
           _lobbySocket.emit('join_room', { roomName: code, playerName: myName });
         });
 
-        _lobbySocket.on('player_joined', (p) => {
+        const onFriendJoined = (p) => {
           const friendName = p.username ?? p.name ?? 'Friend';
           const waitEl = document.getElementById('mm-wait-status');
           if (waitEl) {
@@ -321,18 +321,19 @@ export class MainMenuUI {
           // Enable the Start button
           const startBtn = document.getElementById('mm-start-1v1');
           if (startBtn) {
-            startBtn.textContent  = `▶ START GAME WITH ${friendName.toUpperCase()}`;
+            startBtn.textContent         = `▶ START GAME WITH ${friendName.toUpperCase()}`;
             startBtn.style.opacity       = '1';
             startBtn.style.pointerEvents = 'auto';
             startBtn.style.cursor        = 'pointer';
             startBtn.style.filter        = 'none';
-            startBtn.style.animation     = 'elim-in .3s ease forwards, vignette-pulse 1.2s ease-in-out infinite';
             startBtn.addEventListener('click', () => {
               _cleanupLobby();
               this._done({ mode: 'online', level: 1, roomCode: code });
             }, { once: true });
           }
-        });
+        };
+        _lobbySocket.on('player_joined', onFriendJoined);
+        _lobbySocket.on('player:joined', onFriendJoined);
 
         _lobbySocket.on('connect_error', () => {
           const waitEl = document.getElementById('mm-wait-status');
