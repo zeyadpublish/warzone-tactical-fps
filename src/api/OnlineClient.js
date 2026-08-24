@@ -39,22 +39,17 @@ export class OnlineClient {
   async connect(roomCode = 'main') {
     this.roomName = roomCode;
 
-    // Create/join room via REST first
+    // Notify server about the room via REST (informational only — don't change roomName)
     try {
-      const res = await fetch(`${API_URL}/rooms`, {
+      await fetch(`${API_URL}/rooms`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ roomCode, roomName: roomCode }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        // Server returns { id, roomId, roomCode, status }
-        this.roomName = data.roomCode ?? data.roomId ?? data.id ?? roomCode;
-        console.log('[OnlineClient] Room via REST:', this.roomName);
-      }
     } catch (e) {
-      console.warn('[OnlineClient] REST room join failed:', e.message);
+      console.warn('[OnlineClient] REST room notify failed (non-fatal):', e.message);
     }
+    // ALWAYS use the original user-entered code as socket room name
 
     return new Promise((resolve) => {
       this.socket = io(SERVER_URL, {

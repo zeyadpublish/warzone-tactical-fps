@@ -299,60 +299,63 @@ export class MainMenuUI {
 
       // Connect a lightweight lobby socket to listen for the friend joining
       _cleanupLobby();
-      import('https://cdn.socket.io/4.7.2/socket.io.esm.min.js').then(({ io }) => {
+
+      const _activateLobbyStart = (friendName) => {
+        const waitEl  = document.getElementById('mm-wait-status');
+        const startBtn = document.getElementById('mm-start-1v1');
+        if (!startBtn) return;
+        if (waitEl) waitEl.innerHTML = `<span style="color:#00ff88;font-size:15px;letter-spacing:2px">✅ ${friendName} joined!</span>`;
+        startBtn.textContent         = `▶ START GAME WITH ${friendName.toUpperCase()}`;
+        startBtn.style.opacity       = '1';
+        startBtn.style.pointerEvents = 'auto';
+        startBtn.style.cursor        = 'pointer';
+        startBtn.style.filter        = 'none';
+        startBtn.style.background    = 'linear-gradient(135deg,#00e5ff,#0077ff)';
+        startBtn.addEventListener('click', () => {
+          _cleanupLobby();
+          this._done({ mode: 'online', level: 1, roomCode: code });
+        }, { once: true });
+      };
+
+      // Use the bundled socket.io-client (already in node_modules)
+      import('socket.io-client').then(({ io }) => {
         const session = this._session;
         const myName  = session?.user?.username || 'Host';
         _lobbySocket  = io('https://warzone-tactical-fps-server--my-api.replit.app', {
           transports: ['websocket', 'polling'],
-          auth:  { token: session?.token },
-          query: { token: session?.token, name: myName },
         });
 
         _lobbySocket.on('connect', () => {
-          _lobbySocket.emit('join_room', { roomName: code, playerName: myName });
+          console.log('[Lobby] Connected, joining room:', code);
+          _lobbySocket.emit('join_room', {
+            roomName:   code,
+            roomId:     code,
+            playerName: myName,
+          });
         });
 
-        const onFriendJoined = (p) => {
-          const friendName = p.username ?? p.name ?? 'Friend';
-          const waitEl = document.getElementById('mm-wait-status');
-          if (waitEl) {
-            waitEl.innerHTML = `<span style="color:#00ff88;font-size:15px;letter-spacing:2px">✅ ${friendName} joined!</span>`;
-          }
-          // Enable the Start button
-          const startBtn = document.getElementById('mm-start-1v1');
-          if (startBtn) {
-            startBtn.textContent         = `▶ START GAME WITH ${friendName.toUpperCase()}`;
-            startBtn.style.opacity       = '1';
-            startBtn.style.pointerEvents = 'auto';
-            startBtn.style.cursor        = 'pointer';
-            startBtn.style.filter        = 'none';
-            startBtn.addEventListener('click', () => {
-              _cleanupLobby();
-              this._done({ mode: 'online', level: 1, roomCode: code });
-            }, { once: true });
-          }
-        };
-        _lobbySocket.on('player_joined', onFriendJoined);
-        _lobbySocket.on('player:joined', onFriendJoined);
+        // player:joined fires when a NEW player joins AFTER us
+        _lobbySocket.on('player:joined', ({ playerId, name } = {}) => {
+          if (playerId === _lobbySocket.id) return; // skip self
+          _activateLobbyStart(name ?? 'Friend');
+        });
 
-        _lobbySocket.on('connect_error', () => {
-          const waitEl = document.getElementById('mm-wait-status');
-          if (waitEl) waitEl.innerHTML = '<span style="color:#ff4455">⚠ Cannot reach server — check connection</span>';
+        // room:state fires immediately on join — check if someone is already there
+        _lobbySocket.on('room:state', ({ players = [] } = {}) => {
+          const others = players.filter(p => p.playerId !== _lobbySocket.id);
+          if (others.length > 0) {
+            _activateLobbyStart(others[0].name ?? 'Friend');
+          }
+        });
+
+        _lobbySocket.on('connect_error', (err) => {
+          console.warn('[Lobby] connect_error:', err.message);
+          // Enable start button as fallback so user isn't stuck
+          _activateLobbyStart('Friend (offline mode)');
         });
       }).catch(() => {
-        // Fallback: no pre-game socket, just show the code and let them start manually
-        const startBtn = document.getElementById('mm-start-1v1');
-        if (startBtn) {
-          startBtn.textContent         = '▶ START GAME NOW';
-          startBtn.style.opacity       = '1';
-          startBtn.style.pointerEvents = 'auto';
-          startBtn.style.filter        = 'none';
-          startBtn.style.cursor        = 'pointer';
-          startBtn.addEventListener('click', () => {
-            _cleanupLobby();
-            this._done({ mode: 'online', level: 1, roomCode: code });
-          }, { once: true });
-        }
+        // socket.io-client not importable — enable button as fallback
+        _activateLobbyStart('Friend');
       });
     });
 
