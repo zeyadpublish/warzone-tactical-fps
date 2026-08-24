@@ -1,12 +1,20 @@
 /* ═══════════════════════════════════════════════════════════════
    OnlineClient.js  —  Socket.io multiplayer client
    Server: https://warzone-tactical-fps-server--my-api.replit.app
-   Event contract (exact from server docs):
-     CLIENT → player:move    { x, y, rotation }
-     CLIENT → player:shoot   { origin, direction }
-     SERVER → player:joined  { playerId, name }
-     SERVER → player:left    { playerId }
-     SERVER → room:state     { players, phase }
+
+   EXACT event contract (from server docs):
+   CLIENT → join_room             { roomName, roomId, playerName }
+   CLIENT → player:move           { x, y, z, health, anim }
+   CLIENT → shoot_event           { origin, direction }
+   CLIENT → hit_event             { targetId, damage, hitZone }
+   SERVER → room:state            { players, phase }
+   SERVER → player:joined         { playerId, name }
+   SERVER → player:left           { playerId }
+   SERVER → players_transform_sync [ playerState ]
+   SERVER → player_killed         { killerName, victimName, hitZone }
+   REST   → POST /api/rooms       returns { id, roomId, roomCode, status }
+   REST   → GET  /api/leaderboard
+   REST   → GET  /api/online
    ═══════════════════════════════════════════════════════════════ */
 import { io } from 'socket.io-client';
 
@@ -19,33 +27,33 @@ export class OnlineClient {
     this.socket    = null;
     this.connected = false;
     this.roomName  = 'main';
-    this.roomId    = null;   // server-assigned room id (if using REST /api/rooms)
-    this.players   = new Map(); // playerId → { playerId, name, x, y, rotation }
+    this.players   = new Map(); // playerId → playerState
     this._handlers = {};
     this._pingInterval = null;
     this._latency  = 0;
   }
 
   /* ══════════════════════════════════════════════════════
-     Connect — creates/joins room via REST then socket
+     Connect
   ══════════════════════════════════════════════════════ */
   async connect(roomCode = 'main') {
     this.roomName = roomCode;
 
-    // Try to create/join room via REST first
+    // Create/join room via REST first
     try {
       const res = await fetch(`${API_URL}/rooms`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ roomCode, name: roomCode }),
+        body: JSON.stringify({ roomCode, roomName: roomCode }),
       });
       if (res.ok) {
         const data = await res.json();
-        this.roomId = data.id ?? data.roomId ?? roomCode;
-        console.log('[OnlineClient] Room created/joined via REST:', this.roomId);
+        // Server returns { id, roomId, roomCode, status }
+        this.roomName = data.roomCode ?? data.roomId ?? data.id ?? roomCode;
+        console.log('[OnlineClient] Room via REST:', this.roomName);
       }
     } catch (e) {
-      console.warn('[OnlineClient] REST room join failed, using socket only:', e.message);
+      console.warn('[OnlineClient] REST room join failed:', e.message);
     }
 
     return new Promise((resolve) => {
@@ -58,12 +66,16 @@ export class OnlineClient {
 
       this.socket.on('connect', () => {
         this.connected = true;
-        console.log('[OnlineClient] Socket connected. ID:', this.socket.id);
+        console.log('[OnlineClient] Connected:', this.socket.id);
 
-        // Join room via socket event
-        this.socket.emit('join_room', { roomName: this.roomName, roomId: this.roomId });
+        // join_room { roomName, roomId, playerName }
+        const name = this._playerName ?? 'Operator';
+        this.socket.emit('join_room', {
+          roomName:   this.roomName,
+          roomId:     this.roomName,
+          playerName: name,
+        });
 
-        // Start ping
         this._startPing();
         resolve(true);
       });
@@ -80,64 +92,64 @@ export class OnlineClient {
       });
 
       /* ══════════════════════════════════════════════════
-         SERVER → CLIENT events (exact contract)
+         SERVER → CLIENT (exact contract)
       ══════════════════════════════════════════════════ */
 
-      // room:state { players, phase } — full state sync after room changes
-      this.socket.on('room:state', ({ players, phase } = {}) => {
-        console.log('[OnlineClient] room:state — players:', players?.length, 'phase:', phase);
-        players?.forEach(p => {
-          if (p.playerId !== this.socket.id) {
-            this.players.set(p.playerId, p);
-          }
+      // room:state { players, phase }
+      this.socket.on('room:state', ({ players = [], phase } = {}) => {
+        console.log('[OnlineClient] room:state — players:', players.length, 'phase:', phase);
+        players.forEach(p => {
+          if (p.playerId !== this.socket.id) this.players.set(p.playerId, p);
         });
         this._handlers.room_state?.({ players, phase });
       });
 
-      // player:joined { playerId, name } — new operative enters room
+      // player:joined { playerId, name }
       this.socket.on('player:joined', ({ playerId, name } = {}) => {
-        if (playerId === this.socket.id) return; // skip self
-        this.players.set(playerId, { playerId, name, x: 0, y: 0, rotation: 0 });
+        if (playerId === this.socket.id) return;
+        this.players.set(playerId, { playerId, name, x: 0, y: 0, z: 0, anim: 'idle' });
         this.hud?.addKillfeedEvent?.('', (name ?? 'Operator') + ' joined', '', false);
-        // Pass in normalized format that RemotePlayer expects
-        this._handlers.player_joined?.({ id: playerId, username: name, name });
+        // Normalize to { id, username, name } for RemotePlayer compatibility
+        this._handlers.player_joined?.({ id: playerId, playerId, username: name, name });
       });
 
-      // player:left { playerId } — player disconnected
+      // player:left { playerId }
       this.socket.on('player:left', ({ playerId } = {}) => {
         this.players.delete(playerId);
-        this._handlers.player_left?.({ id: playerId });
+        this._handlers.player_left?.({ id: playerId, playerId });
       });
 
-      // Ping
-      this.socket.on('pong', (ts) => { this._latency = Math.round((Date.now() - ts) / 2); });
-      this.socket.on('server_pong', (ts) => { this._latency = Math.round((Date.now() - ts) / 2); });
-
-      /* ══════════════════════════════════════════════════
-         Optional extra events the server might also send
-         (keep compatibility just in case)
-      ══════════════════════════════════════════════════ */
-      this.socket.on('players_transform_sync', (states) => {
-        states?.forEach(s => {
+      // players_transform_sync [ playerState ] — 30 Hz
+      this.socket.on('players_transform_sync', (states = []) => {
+        states.forEach(s => {
           const id = s.playerId ?? s.id;
-          if (id && id !== this.socket.id) this.players.set(id, { ...this.players.get(id), ...s });
+          if (!id || id === this.socket.id) return;
+          this.players.set(id, { ...this.players.get(id), ...s });
         });
         this._handlers.players_transform_sync?.(states);
       });
 
-      this.socket.on('receive_damage', (data) => this._handlers.receive_damage?.(data));
-      this.socket.on('receive:damage', (data) => this._handlers.receive_damage?.(data));
-      this.socket.on('player_killed',  (data) => {
-        this._handlers.player_killed?.(data);
-        this.hud?.addKillfeedEvent?.(data.killerName ?? '?', data.victimName ?? '?', 'rifle', false);
+      // player_killed { killerName, victimName, hitZone }
+      this.socket.on('player_killed', ({ killerName, victimName, hitZone } = {}) => {
+        this.hud?.addKillfeedEvent?.(killerName ?? '?', victimName ?? '?', 'M4A1', hitZone === 'head');
+        this._handlers.player_killed?.({ killerName, victimName, hitZone });
       });
-      this.socket.on('player:killed', (data) => {
-        this._handlers.player_killed?.(data);
-        this.hud?.addKillfeedEvent?.(data.killerName ?? '?', data.victimName ?? '?', 'rifle', false);
+
+      // receive_damage (may be added by server later)
+      this.socket.on('receive_damage', (data = {}) => {
+        this._handlers.receive_damage?.(data);
       });
+
+      // scoreboard (may be added by server later)
       this.socket.on('scoreboard_sync',  (s) => this._handlers.scoreboard_sync?.(s));
       this.socket.on('scoreboard:sync',  (s) => this._handlers.scoreboard_sync?.(s));
+
+      // respawn
       this.socket.on('respawn', (d) => this._handlers.respawn?.(d));
+
+      // Ping
+      this.socket.on('pong',        (ts) => { this._latency = Math.round((Date.now() - ts) / 2); });
+      this.socket.on('server_pong', (ts) => { this._latency = Math.round((Date.now() - ts) / 2); });
     });
   }
 
@@ -145,42 +157,41 @@ export class OnlineClient {
      CLIENT → SERVER (exact contract)
   ══════════════════════════════════════════════════ */
 
-  // player:move { x, y, rotation } — called at 20 Hz from game loop
+  // player:move { x, y, z, health, anim } — 20 Hz
   sendPlayerState(position, yaw, pitch, health, armor, animState) {
     if (!this.connected || !this.socket) return;
-    // Server uses x, y, rotation — map 3D position to 2D + rotation
     this.socket.emit('player:move', {
-      x:        +position.x.toFixed(2),
-      y:        +position.z.toFixed(2), // use Z as 2D Y (top-down)
-      rotation: +yaw.toFixed(3),
-      // Extra fields for our remote player rendering (server may ignore)
-      posY:     +position.y.toFixed(2),
-      health,
-      armor,
-      anim: animState,
+      x:      +position.x.toFixed(2),
+      y:      +position.y.toFixed(2),
+      z:      +position.z.toFixed(2),
+      yaw:    +yaw.toFixed(3),
+      health: Math.round(health ?? 100),
+      armor:  Math.round(armor  ?? 0),
+      anim:   animState ?? 'idle',
     });
   }
 
-  // player:shoot { origin, direction } — authoritative fire event
+  // shoot_event { origin, direction }
   sendShot(origin, direction, hitPlayerId = null, damage = 0) {
     if (!this.connected || !this.socket) return;
-    this.socket.emit('player:shoot', {
+    this.socket.emit('shoot_event', {
       origin:    { x: origin.x,    y: origin.y,    z: origin.z },
       direction: { x: direction.x, y: direction.y, z: direction.z },
-      // Extra fields server may ignore but useful for hit detection
       hitPlayerId, damage,
     });
   }
 
-  // hit_event — may not be in server contract but keep for future
+  // hit_event { targetId, damage, hitZone }
   sendHit(targetId, damage, hitZone = 'torso') {
     if (!this.connected || !this.socket) return;
     this.socket.emit('hit_event', { targetId, damage, hitZone });
   }
 
   /* ══════════════════════════════════════════════════
-     Ping / Latency
+     Helpers
   ══════════════════════════════════════════════════ */
+  setPlayerName(name) { this._playerName = name; }
+
   _startPing() {
     this._stopPing();
     this._pingInterval = setInterval(() => {
@@ -190,11 +201,9 @@ export class OnlineClient {
   _stopPing() {
     if (this._pingInterval) { clearInterval(this._pingInterval); this._pingInterval = null; }
   }
+
   get ping() { return this._latency; }
 
-  /* ══════════════════════════════════════════════════
-     Misc
-  ══════════════════════════════════════════════════ */
   disconnect() {
     this._stopPing();
     this.socket?.disconnect();

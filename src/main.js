@@ -41,24 +41,16 @@ class Game {
     /* ── Init engine ── */
     await this._initEngine();
 
-    /* ── Online mode ── */
-    if (choice.mode === 'online' && this.session?.token) {
+    /* ── Online mode (no auth required on new server) ── */
+    if (choice.mode === 'online') {
       this.online = new OnlineClient(this.hud);
-      const roomCode = choice.roomCode ?? 'main';
+      const roomCode   = choice.roomCode ?? 'main';
+      const playerName = this.session?.user?.username ?? ('Operator_' + Math.random().toString(36).slice(2,6).toUpperCase());
+      this.online.setPlayerName(playerName);
       const connected = await this.online.connect(roomCode);
       if (connected) {
         this._isOnline = true;
-        this.hud.initLeaderboard(this.session.user?.username ?? 'You');
-        this.online.on('scoreboard_sync', (scores) => {
-          const entries = scores.map(s => ({
-            name:   s.username ?? s.name ?? s.id,
-            kills:  s.kills ?? 0,
-            deaths: s.deaths ?? 0,
-            ping:   s.ping ?? null,
-            isYou:  s.id === this.online?.socket?.id,
-          }));
-          this.hud.updateLeaderboard(entries);
-        });
+        this.hud.initLeaderboard(playerName);
         this._setupOnlineHandlers();
       } else {
         this._toast('⚠ Server unreachable — switching to offline mode');
@@ -384,21 +376,21 @@ class Game {
       });
     });
 
-    // ── 30 Hz position sync (from server if it sends this) ──
+    // ── 30 Hz position sync — [ playerState ] ──
     this.online.on('players_transform_sync', (states) => {
       for (const s of states) {
         const id = s.playerId ?? s.id;
         if (!id || id === this.online.socket?.id) continue;
         const rp = getOrCreate(id, s.name ?? 'Operator');
         if (rp) {
-          // New server uses {x, y, rotation} in 2D — map back to 3D
+          // New server sends true 3D: { x, y, z, yaw, health, anim }
           rp.applyState({
-            x:   s.x   ?? s.position?.x ?? 0,
-            y:   s.posY ?? s.position?.y ?? 0,
-            z:   s.y   ?? s.position?.z ?? 0,  // server 2D Y → 3D Z
-            yaw: s.rotation ?? s.yaw ?? 0,
-            health: s.health,
-            anim:   s.anim ?? s.animState,
+            x:      s.x      ?? 0,
+            y:      s.y      ?? 0,
+            z:      s.z      ?? 0,
+            yaw:    s.yaw    ?? s.rotation ?? 0,
+            health: s.health ?? 100,
+            anim:   s.anim   ?? 'idle',
           });
         }
       }
@@ -410,23 +402,23 @@ class Game {
       this._toast(`💥 Hit by ${attackerName ?? 'enemy'} for ${amount} dmg`);
     });
 
-    // ── Kill events ──
-    this.online.on('player_killed', msg => {
-      const mySocketId = this.online.socket?.id;
-      if (msg.killerSocketId === mySocketId || msg.killerId === mySocketId) {
+    // ── Kill events — { killerName, victimName, hitZone } ──
+    this.online.on('player_killed', ({ killerName, victimName, hitZone } = {}) => {
+      const myName = this.session?.user?.username ?? '';
+      if (killerName === myName) {
         this.kills++;
-        this.hud.addKillfeedEvent('YOU', msg.victimName ?? 'Enemy', 'M4A1', false);
-        this.hud.showEliminatedBanner(msg.victimName ?? 'Enemy', false);
+        this.hud.addKillfeedEvent('YOU', victimName ?? 'Enemy', 'M4A1', hitZone === 'head');
+        this.hud.showEliminatedBanner(victimName ?? 'Enemy', hitZone === 'head');
         this.audio.playKill();
       } else {
-        this.hud.addKillfeedEvent(msg.killerName ?? '?', msg.victimName ?? '?', 'M4A1', false);
+        this.hud.addKillfeedEvent(killerName ?? '?', victimName ?? '?', 'M4A1', hitZone === 'head');
       }
     });
 
     // ── Scoreboard ──
     this.online.on('scoreboard_sync', scores => {
       const entries = (scores ?? []).map(s => ({
-        name:   s.username ?? s.name ?? s.id ?? '?',
+        name:   s.username ?? s.name ?? s.playerId ?? '?',
         kills:  s.kills  ?? 0,
         deaths: s.deaths ?? 0,
         ping:   s.ping   ?? null,
